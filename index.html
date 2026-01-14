@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RHO File Converter</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        .card { background: white; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem; }
+        .header { margin-bottom: 1.5rem; }
+        h1 { font-size: 2rem; font-weight: 700; color: #1f2937; margin-bottom: 0.5rem; }
+        .subtitle { color: #6b7280; }
+        .btn { padding: 0.75rem 1.5rem; border: none; border-radius: 0.5rem; cursor: pointer; font-weight: 500; transition: all 0.2s; display: inline-flex; align-items: center; gap: 0.5rem; }
+        .btn-primary { background: #2563eb; color: white; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-secondary { background: #7c3aed; color: white; }
+        .btn-secondary:hover { background: #6d28d9; }
+        .btn-success { background: #059669; color: white; }
+        .btn-success:hover { background: #047857; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+        .form-group { display: flex; flex-direction: column; }
+        .label { font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.25rem; }
+        input[type="range"] { width: 100%; }
+        select { padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.5rem; }
+        .checkbox-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+        .canvas-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; }
+        canvas { width: 100%; border: 2px solid #e5e7eb; border-radius: 0.5rem; }
+        .progress-bar { width: 100%; height: 0.75rem; background: #e5e7eb; border-radius: 9999px; overflow: hidden; margin-top: 0.5rem; }
+        .progress-fill { height: 100%; background: #2563eb; transition: width 0.3s; }
+        .download-box { background: white; border: 2px solid #10b981; border-radius: 0.5rem; padding: 1.5rem; }
+        textarea { width: 100%; height: 16rem; font-family: monospace; font-size: 0.75rem; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; background: #f9fafb; }
+        .debug { background: #eff6ff; border: 1px solid #bfdbfe; padding: 1rem; border-radius: 0.5rem; margin-top: 1rem; }
+        .debug-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.5rem; font-size: 0.875rem; }
+        .help-text { font-size: 0.75rem; color: #6b7280; margin-top: 0.5rem; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        const RhoConverter = () => {
+            const [file, setFile] = useState(null);
+            const [threshold, setThreshold] = useState(128);
+            const [numPoints, setNumPoints] = useState(500);
+            const [invert, setInvert] = useState(false);
+            const [connectionType, setConnectionType] = useState('separate');
+            const [processing, setProcessing] = useState(false);
+            const [progress, setProgress] = useState(0);
+            const [rhoData, setRhoData] = useState(null);
+            const [debugInfo, setDebugInfo] = useState(null);
+            
+            const originalCanvasRef = useRef(null);
+            const binaryCanvasRef = useRef(null);
+            const visualizerCanvasRef = useRef(null);
+
+            const drawOriginal = (imageFile) => {
+                const canvas = originalCanvasRef.current;
+                const ctx = canvas.getContext('2d');
+                const img = new Image();
+                
+                img.onload = () => {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                };
+                img.src = URL.createObjectURL(imageFile);
+            };
+
+            const handleConvert = async () => {
+                if (!file) return;
+                
+                setProcessing(true);
+                setProgress(0);
+                
+                try {
+                    const canvas = originalCanvasRef.current;
+                    const ctx = canvas.getContext('2d');
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    
+                    // Binary conversion
+                    setProgress(10);
+                    const binaryCanvas = binaryCanvasRef.current;
+                    binaryCanvas.width = canvas.width;
+                    binaryCanvas.height = canvas.height;
+                    const binaryCtx = binaryCanvas.getContext('2d');
+                    const binaryData = ctx.createImageData(canvas.width, canvas.height);
+                    
+                    for (let i = 0; i < imageData.data.length; i += 4) {
+                        const gray = 0.299 * imageData.data[i] + 0.587 * imageData.data[i + 1] + 0.114 * imageData.data[i + 2];
+                        const binary = (invert ? (gray < threshold) : (gray > threshold)) ? 255 : 0;
+                        binaryData.data[i] = binaryData.data[i + 1] = binaryData.data[i + 2] = binary;
+                        binaryData.data[i + 3] = 255;
+                    }
+                    binaryCtx.putImageData(binaryData, 0, 0);
+                    
+                    // Contour detection
+                    setProgress(30);
+                    const contours = detectContours(binaryData, canvas.width, canvas.height);
+                    
+                    // Group contours into figures
+                    setProgress(50);
+                    const figures = groupContoursIntoFigures(contours);
+                    
+                    // Convert to polar coordinates
+                    setProgress(70);
+                    const rho = convertToPolar(figures, canvas.width, canvas.height, connectionType);
+                    
+                    setProgress(90);
+                    setRhoData(rho);
+                    
+                    // Visualize
+                    drawVisualization(rho, canvas.width, canvas.height, connectionType);
+                    
+                    setDebugInfo({
+                        contours: contours.length,
+                        figures: figures.length,
+                        points: rho.length,
+                        breaks: rho.filter(p => p.isBreak).length
+                    });
+                    
+                    setProgress(100);
+                } catch (error) {
+                    console.error('Conversion error:', error);
+                    alert('Conversion failed: ' + error.message);
+                } finally {
+                    setProcessing(false);
+                }
+            };
+
+            const detectContours = (imageData, width, height) => {
+                const contours = [];
+                const visited = new Set();
+                
+                const isWhite = (x, y) => {
+                    if (x < 0 || x >= width || y < 0 || y >= height) return false;
+                    const idx = (y * width + x) * 4;
+                    return imageData.data[idx] > 127;
+                };
+                
+                const traceContour = (startX, startY) => {
+                    const points = [];
+                    const dirs = [[1,0], [1,1], [0,1], [-1,1], [-1,0], [-1,-1], [0,-1], [1,-1]];
+                    let x = startX, y = startY;
+                    let dir = 0;
+                    const start = `${x},${y}`;
+                    
+                    do {
+                        points.push({x, y});
+                        visited.add(`${x},${y}`);
+                        
+                        let found = false;
+                        for (let i = 0; i < 8; i++) {
+                            const nextDir = (dir + i) % 8;
+                            const nx = x + dirs[nextDir][0];
+                            const ny = y + dirs[nextDir][1];
+                            
+                            if (isWhite(nx, ny)) {
+                                x = nx;
+                                y = ny;
+                                dir = (nextDir + 6) % 8;
+                                found = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!found) break;
+                        if (points.length > width * height) break;
+                        
+                    } while (`${x},${y}` !== start || points.length < 4);
+                    
+                    return points.length > 3 ? points : null;
+                };
+                
+                for (let y = 0; y < height; y++) {
+                    for (let x = 0; x < width; x++) {
+                        if (isWhite(x, y) && !visited.has(`${x},${y}`)) {
+                            const contour = traceContour(x, y);
+                            if (contour) {
+                                const area = calculateArea(contour);
+                                contours.push({ points: contour, area });
+                            }
+                        }
+                    }
+                }
+                
+                return contours.sort((a, b) => Math.abs(b.area) - Math.abs(a.area));
+            };
+
+            const calculateArea = (points) => {
+                let area = 0;
+                for (let i = 0; i < points.length; i++) {
+                    const j = (i + 1) % points.length;
+                    area += points[i].x * points[j].y - points[j].x * points[i].y;
+                }
+                return area / 2;
+            };
+
+            const isPointInPolygon = (point, polygon) => {
+                let inside = false;
+                for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+                    const xi = polygon[i].x, yi = polygon[i].y;
+                    const xj = polygon[j].x, yj = polygon[j].y;
+                    const intersect = ((yi > point.y) !== (yj > point.y)) &&
+                                    (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+                    if (intersect) inside = !inside;
+                }
+                return inside;
+            };
+
+            const groupContoursIntoFigures = (contours) => {
+                const figures = [];
+                const used = new Set();
+                
+                contours.forEach((contour, idx) => {
+                    if (used.has(idx)) return;
+                    
+                    const isOuter = contour.area > 0;
+                    
+                    if (isOuter) {
+                        const figure = {
+                            outer: contour,
+                            holes: []
+                        };
+                        
+                        contours.forEach((innerContour, innerIdx) => {
+                            if (innerIdx === idx || used.has(innerIdx)) return;
+                            if (innerContour.area > 0) return;
+                            
+                            if (isPointInPolygon(innerContour.points[0], contour.points)) {
+                                figure.holes.push(innerContour);
+                                used.add(innerIdx);
+                            }
+                        });
+                        
+                        figures.push(figure);
+                        used.add(idx);
+                    }
+                });
+                
+                return figures;
+            };
+
+            const resamplePoints = (points, targetCount) => {
+                if (points.length === 0) return [];
+                
+                const lengths = [];
+                let totalLength = 0;
+                
+                for (let i = 0; i < points.length - 1; i++) {
+                    const dx = points[i + 1].x - points[i].x;
+                    const dy = points[i + 1].y - points[i].y;
+                    const len = Math.sqrt(dx * dx + dy * dy);
+                    lengths.push(len);
+                    totalLength += len;
+                }
+                
+                const resampled = [points[0]];
+                const spacing = totalLength / (targetCount - 1);
+                let accumulated = 0;
+                let segmentIdx = 0;
+                
+                for (let i = 1; i < targetCount - 1; i++) {
+                    const targetDist = i * spacing;
+                    
+                    while (accumulated + lengths[segmentIdx] < targetDist && segmentIdx < lengths.length - 1) {
+                        accumulated += lengths[segmentIdx];
+                        segmentIdx++;
+                    }
+                    
+                    const remainingDist = targetDist - accumulated;
+                    const t = remainingDist / lengths[segmentIdx];
+                    
+                    const p1 = points[segmentIdx];
+                    const p2 = points[segmentIdx + 1];
+                    
+                    resampled.push({
+                        x: p1.x + t * (p2.x - p1.x),
+                        y: p1.y + t * (p2.y - p1.y)
+                    });
+                }
+                
+                resampled.push(points[points.length - 1]);
+                return resampled;
+            };
+
+            const convertToPolar = (figures, width, height, connectionType) => {
+                const centerX = width / 2;
+                const centerY = height / 2;
+                const maxRadius = Math.sqrt(centerX * centerX + centerY * centerY);
+                
+                const result = [];
+                const pointsPerContour = Math.floor(numPoints / (figures.reduce((sum, f) => sum + 1 + f.holes.length, 0)));
+                
+                figures.forEach((figure, figIdx) => {
+                    const allContours = [figure.outer, ...figure.holes];
+                    
+                    allContours.forEach((contour, contourIdx) => {
+                        const resampled = resamplePoints(contour.points, pointsPerContour);
+                        
+                        resampled.forEach((point, idx) => {
+                            const dx = point.x - centerX;
+                            const dy = point.y - centerY;
+                            const r = Math.sqrt(dx * dx + dy * dy) / maxRadius;
+                            let theta = Math.atan2(dy, dx);
+                            if (theta < 0) theta += 2 * Math.PI;
+                            
+                            result.push({
+                                theta: theta,
+                                rho: r,
+                                isBreak: idx === 0 && contourIdx > 0
+                            });
+                        });
+                        
+                        if (contourIdx < allContours.length - 1) {
+                            result.push({ theta: 0, rho: 0, isBreak: true });
+                        }
+                    });
+                    
+                    if (figIdx < figures.length - 1) {
+                        result.push({ theta: 0, rho: 0, isBreak: true });
+                    }
+                });
+                
+                return result;
+            };
+
+            const drawVisualization = (rhoData, width, height, connectionType) => {
+                const canvas = visualizerCanvasRef.current;
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                
+                ctx.fillStyle = '#1f2937';
+                ctx.fillRect(0, 0, width, height);
+                
+                const centerX = width / 2;
+                const centerY = height / 2;
+                const maxRadius = Math.sqrt(centerX * centerX + centerY * centerY);
+                
+                ctx.strokeStyle = '#3b82f6';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                
+                let pathStarted = false;
+                
+                rhoData.forEach((p, idx) => {
+                    const r = p.rho * maxRadius;
+                    const x = centerX + r * Math.cos(p.theta);
+                    const y = centerY + r * Math.sin(p.theta);
+                    
+                    if (p.isBreak && pathStarted && connectionType === 'separate') {
+                        ctx.stroke();
+                        ctx.beginPath();
+                        ctx.moveTo(x, y);
+                    } else if (!pathStarted || idx === 0) {
+                        ctx.moveTo(x, y);
+                        pathStarted = true;
+                    } else {
+                        if (connectionType === 'perimeter' && p.isBreak) {
+                            const prevP = rhoData[idx - 1];
+                            const prevR = prevP.rho * maxRadius;
+                            const prevX = centerX + prevR * Math.cos(prevP.theta);
+                            const prevY = centerY + prevR * Math.sin(prevP.theta);
+                            
+                            const arcRadius = Math.max(prevR, r);
+                            const startAngle = Math.min(prevP.theta, p.theta);
+                            const endAngle = Math.max(prevP.theta, p.theta);
+                            
+                            ctx.arc(centerX, centerY, arcRadius, startAngle, endAngle);
+                        } else {
+                            ctx.lineTo(x, y);
+                        }
+                    }
+                });
+                
+                ctx.stroke();
+            };
+
+            const handleDownload = () => {
+                if (!rhoData) return;
+                
+                let content = '';
+                rhoData.forEach(p => {
+                    if (p.isBreak) {
+                        content += '\n';
+                    } else {
+                        content += `${p.theta.toFixed(6)} ${p.rho.toFixed(6)}\n`;
+                    }
+                });
+                
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = file.name.replace(/\.[^.]+$/, '.rho');
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            const handleCopy = () => {
+                if (!rhoData) return;
+                
+                let content = '';
+                rhoData.forEach(p => {
+                    if (p.isBreak) {
+                        content += '\n';
+                    } else {
+                        content += `${p.theta.toFixed(6)} ${p.rho.toFixed(6)}\n`;
+                    }
+                });
+                
+                const filename = file.name.replace(/\.[^.]+$/, '.rho');
+                
+                navigator.clipboard.writeText(content).then(() => {
+                    alert(`RHO content copied to clipboard!\n\nSave as: ${filename}\nPoints: ${rhoData.filter(p => !p.isBreak).length}`);
+                }).catch(() => {
+                    alert('Copy failed. Check console for data.');
+                    console.log('RHO Data:', content);
+                });
+            };
+
+            return (
+                <div className="container">
+                    <div className="card">
+                        <div className="header">
+                            <h1>RHO File Converter</h1>
+                            <p className="subtitle">Convert images to theta-rho polar coordinates for Sandify</p>
+                        </div>
+                        
+                        <div style={{display: 'flex', gap: '1rem', marginBottom: '1rem'}}>
+                            <label className="btn btn-primary">
+                                📤 Upload Image
+                                <input
+                                    type="file"
+                                    accept=".png,.jpg,.jpeg"
+                                    onChange={(e) => {
+                                        const f = e.target.files[0];
+                                        if (f) {
+                                            setFile(f);
+                                            setRhoData(null);
+                                            drawOriginal(f);
+                                        }
+                                    }}
+                                    style={{display: 'none'}}
+                                />
+                            </label>
+                            
+                            {file && !processing && (
+                                <button onClick={handleConvert} className="btn btn-secondary">
+                                    ⚙️ Convert
+                                </button>
+                            )}
+                            
+                            {rhoData && (
+                                <>
+                                    <button onClick={handleDownload} className="btn btn-success">
+                                        💾 Download RHO
+                                    </button>
+                                    <button onClick={handleCopy} className="btn btn-success">
+                                        📋 Copy to Clipboard
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+
+                    {file && (
+                        <div className="card">
+                            <h2 style={{marginBottom: '1rem'}}>Settings</h2>
+                            <div className="settings-grid">
+                                <div className="form-group">
+                                    <label className="label">Threshold: {threshold}</label>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="255"
+                                        value={threshold}
+                                        onChange={(e) => setThreshold(parseInt(e.target.value))}
+                                        disabled={processing}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label className="label">Points: {numPoints}</label>
+                                    <input
+                                        type="range"
+                                        min="100"
+                                        max="2000"
+                                        step="100"
+                                        value={numPoints}
+                                        onChange={(e) => setNumPoints(parseInt(e.target.value))}
+                                        disabled={processing}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label className="label">Connection Type</label>
+                                    <select
+                                        value={connectionType}
+                                        onChange={(e) => setConnectionType(e.target.value)}
+                                        disabled={processing}
+                                    >
+                                        <option value="separate">Separate (no lines)</option>
+                                        <option value="straight">Straight lines</option>
+                                        <option value="perimeter">Along perimeter</option>
+                                    </select>
+                                </div>
+                                <div className="form-group" style={{justifyContent: 'center'}}>
+                                    <label className="checkbox-label">
+                                        <input
+                                            type="checkbox"
+                                            checked={invert}
+                                            onChange={(e) => setInvert(e.target.checked)}
+                                            disabled={processing}
+                                        />
+                                        Invert Colors
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            {processing && (
+                                <div className="progress-bar">
+                                    <div className="progress-fill" style={{width: `${progress}%`}}></div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {file && (
+                        <div className="canvas-grid">
+                            <div>
+                                <h3 style={{marginBottom: '0.5rem'}}>Original Image</h3>
+                                <canvas ref={originalCanvasRef}></canvas>
+                            </div>
+                            <div>
+                                <h3 style={{marginBottom: '0.5rem'}}>Binary Image</h3>
+                                <canvas ref={binaryCanvasRef}></canvas>
+                            </div>
+                            {rhoData && (
+                                <div>
+                                    <h3 style={{marginBottom: '0.5rem'}}>Visualization</h3>
+                                    <canvas ref={visualizerCanvasRef}></canvas>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {debugInfo && (
+                        <div className="debug">
+                            <h3 style={{marginBottom: '0.5rem'}}>Debug Info</h3>
+                            <div className="debug-grid">
+                                <div>Contours: {debugInfo.contours}</div>
+                                <div>Figures: {debugInfo.figures}</div>
+                                <div>Points: {debugInfo.points}</div>
+                                <div>Breaks: {debugInfo.breaks}</div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        ReactDOM.render(<RhoConverter />, document.getElementById('root'));
+    </script>
+</body>
+</html>
